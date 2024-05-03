@@ -1,9 +1,11 @@
 
 from cryptography.fernet import Fernet
 
+import datetime
 import modules
 import sqlite3
 import json
+import time
 import os
 
 INSTANCE_FOLDER_PATH = "./instance"
@@ -20,12 +22,12 @@ def start(folderPath="./instance"):
     cursor.execute("SELECT * from fortigate")
     fortigates = cursor.fetchall()
 
-    return fortigates, cipherSuite
+    return fortigates, cipherSuite, constants
 
 
 
 filter = modules.Filter()
-allFortigates, cipher = start(INSTANCE_FOLDER_PATH)
+allFortigates, cipher, constants = start(INSTANCE_FOLDER_PATH)
 
 
 def getSysStat(channel, cursor):
@@ -69,19 +71,83 @@ def getSysStat(channel, cursor):
     else:
         print("gather.py:    There was a problem updating hostname and sysStatFiltered. Doesent exist!")
 
-#def show(channel, fortigateId, vdomId, INSTANCE_FOLDER_PATH):
-#    folderPath = INSTANCE_FOLDER_PATH + "/txt"
-#
-#    if os.path.exists(folderPath):
-#        prevConfig = modules.readTxt(folderPath)
-#
-#    output = channel.execute("show")
-#    with open('da', 'w') as f:
-#        f.write(output)
 
+listdirStarts = lambda folderPath, startsWith: [f for f in os.listdir(folderPath) if f.startswith(startsWith)]
 
+def showFindDiffrence(oldFile, newFile, excludeLines):
+    outputStr = ""
+    if oldFile != newFile:
+        prevLines = oldFile.splitlines()
+        outputLine = newFile.splitlines()
+
+        for i, (prevLine, outputLine) in enumerate(zip(prevLines, outputLine)):
+            if prevLine != outputLine and i+1 not in excludeLines:
+                outputStr += f"\nLine {i + 1} changed:\nFrom:   {prevLine}\nTo:   {outputLine} \n"
+ 
+    if outputStr == "":
+        return False, outputStr
+    else: 
+        return True, outputStr 
+
+def show(channel, fortigateId, fortigateIp, vdomId, confSaltLines, INSTANCE_FOLDER_PATH):
+    confLogFileName = str(vdomId) + "_" + "log"
     
+    fileStart = str(vdomId) + "_"
+    fileName = fileStart + str(time.time())
+    folderName = str(fortigateId) + "_" + fortigateIp
+    folderPath = INSTANCE_FOLDER_PATH + "/txt/" + folderName
 
+
+    lastMadeConfFile = None
+    if not os.path.exists(folderPath):
+        os.mkdir(folderPath)
+
+
+# ----- FINDS THE LAST FILE MADE, WITH THE CORRECT ID (why so robust?)
+    configs = listdirStarts(folderPath, fileStart)
+    if len(configs) > 0:
+        lastMadeConfTime = 0
+        for configName in configs:
+            if "_" in configName and os.path.isfile(folderPath + "/" + configName): # CHECKS VALID FILE NAME
+                timeCreated = configName.split("_")[1] # GETS THE TIME.TIME STAMP (GRATER = CREATED LAST)
+
+                try: # IF IT ISNT A CORRECT FLOAT
+                    if float(timeCreated) > lastMadeConfTime: 
+                        lastMadeConfTime = float(timeCreated)                
+                except ValueError as error:
+                    if configName != confLogFileName:
+                        print(f"gather.py:    There was an error converting to float: {error}")
+            else:
+                print(f"gather.py    There was an error with a file: {configName}")
+
+
+            lastMadeConfFile = str(vdomId) + "_" + str(lastMadeConfTime)
+
+
+
+# ----- RUNS THE SHOW COMMAND & FILTERS IT
+    output = channel.execute("show")
+    outputFiltered = filter.showFilter(output)
+
+
+# ----- CHECKS FOR DIFFRENCE BETWEEN NEW AND OLD CONF, if:True THEN IT SAVES THE NEW CONF & APPEND THE UPDATES TO THE LOG FILE.
+# NOTE: need to write this code cleaner/better
+    if lastMadeConfFile != None: 
+        
+        prevConfFile = modules.readTxt(folderPath + "/" + lastMadeConfFile) # READS THE PREVIUS MADE CONF FILE
+        diffrenceBool, diffrenceSTR = showFindDiffrence(prevConfFile, outputFiltered, confSaltLines) # CHECKS THE DIFFRNECE
+
+        if diffrenceBool == True:
+            modules.writeTXT(folderPath + "/" + fileName, outputFiltered) # SAVES THE NEWEST CONF
+
+            diffrenceSTR = f"\n \n{'_'*80} \n" + str(datetime.datetime.now()) + diffrenceSTR
+            modules.writeTXT(folderPath + "/" + confLogFileName, diffrenceSTR, method="a") # APPENDS CHANGES TO THE LOG FILE
+    
+    else:
+        with open(folderPath + "/" + fileName, 'w') as f: # THIS CODE IS RUN WHEN THERE IS NO FILE TO BEGIN WITH
+            f.write(outputFiltered)
+
+            
 
 
 for fortigate in allFortigates:
@@ -92,11 +158,8 @@ for fortigate in allFortigates:
     channel.startup()
 
 
-    #getSysStat(channel, cursor)
-    #show(channel, id, 1, INSTANCE_FOLDER_PATH)
-
-
-
+    getSysStat(channel, cursor)
+    show(channel, id, ip, 7, constants["confSaltLines"], INSTANCE_FOLDER_PATH)
 
 
     sqliteConn.commit()

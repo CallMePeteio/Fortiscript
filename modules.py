@@ -51,7 +51,17 @@ import re
 #        return None  
 #
 
+def readTxt(path):
+    with open (path, "r") as myfile:
+        data = myfile.read()
+    return data
 
+def writeTXT(path, text, method="w"):
+    try:
+        with open(path, method) as f: # SAVES THE NEWEST CONF
+            f.write(text)
+    except Exception as error:
+        print("modules.py    There was an error writing to TXT: {error}")
 
 def getTableColumns(cursor, tableName, onlyNames=True):
     cursor.execute(f"PRAGMA table_info({tableName});")
@@ -66,7 +76,7 @@ def getTableColumns(cursor, tableName, onlyNames=True):
 #------- Wait for data to be available on the channel within a specified timeout
 # Minimum func return time is: burstTimeout
 # Maximum func return time is: timeout
-def terminalScreen(channel, timeout=10, burstTimeout=0.8):
+def terminalScreen(channel, timeout=10, burstTimeout=0.9):
     output = ""
 
     burstTimeoutTime = time.time() + burstTimeout
@@ -103,7 +113,7 @@ class Channel:
 
         output = terminalScreen(self.channel)
 
-        if filter == True:
+        if filter == True and output != None:
             if output.endswith("# ") : # SMALL FILTER, REMOVES: VDOMS NAME # FROM THE END
                 lastNewline = output.rfind("\n")
                 output = output[:lastNewline]
@@ -198,3 +208,12 @@ class Filter:
                 output[key.lower()] = value
 
         return output
+    
+    def showFilter(self, text): # REMOVES \n
+        cleaned_lines = []
+        for line in text.strip().splitlines():
+            cleaned_line = line.strip()
+            cleaned_lines.append(cleaned_line)
+
+        result = '\n'.join(cleaned_lines)
+        return result
