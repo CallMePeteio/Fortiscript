@@ -29,6 +29,9 @@ def start(folderPath="./instance"):
 filter = modules.Filter()
 allFortigates, cipher, constants = start(INSTANCE_FOLDER_PATH)
 
+
+#___________________________ Get Sys Stat ___________________________
+
 def getLastCommand(fortigateId):
     sql = """
         SELECT * FROM get_sys_stat
@@ -52,71 +55,75 @@ def getLastCommand(fortigateId):
 
 def getSysStat(channel, cursor, fortigateId):
     sysStat = channel.execute("get sys stat") 
-    sysStatFiltered = filter.getSysStatFilter(sysStat) # GETS THE FILTERED KEYPOINTS (DICT)
-    lastCommand, lastCommandId = getLastCommand(fortigateId) # GETS THE LAST COMMAND MADE FOR THAT FORTIGATE
+    if sysStat != None:
+        sysStatFiltered = filter.getSysStatFilter(sysStat) # GETS THE FILTERED KEYPOINTS (DICT)
+        lastCommand, lastCommandId = getLastCommand(fortigateId) # GETS THE LAST COMMAND MADE FOR THAT FORTIGATE
 
 
-    newTime = 0
-    if "system_time" in sysStatFiltered:
-        newTime = sysStatFiltered["system_time"]
+        newTime = 0
+        if "system_time" in sysStatFiltered:
+            newTime = sysStatFiltered["system_time"]
 
 
 
-# ----- FINDS THE BIGGEST "command_id" THEN ADDS +1 TO GET A UNIQUE: "command_id"
-    cursor.execute("SELECT MAX(command_id) FROM get_sys_stat")
-    biggestCommandId = cursor.fetchone()[0] 
+    # ----- FINDS THE BIGGEST "command_id" THEN ADDS +1 TO GET A UNIQUE: "command_id"
+        cursor.execute("SELECT MAX(command_id) FROM get_sys_stat")
+        biggestCommandId = cursor.fetchone()[0] 
 
-    if biggestCommandId != None:
-        uniqueComId = biggestCommandId +1
-    else:
-        uniqueComId = 1
+        if biggestCommandId != None:
+            uniqueComId = biggestCommandId +1
+        else:
+            uniqueComId = 1
 
 
-# ----- STORES EATCH DATAPOINT INSIDE A LSIT, REDUCE UNNECCECARY WRITES TO DB
-    data = []
-    for statName, statVal in sysStatFiltered.items():
-        if statName in lastCommand:
-            if lastCommand[statName] != statVal and statName != "system_time":
-                print(statName, statVal)
+    # ----- STORES EATCH DATAPOINT INSIDE A LSIT, REDUCE UNNECCECARY WRITES TO DB
+        data = []
+        for statName, statVal in sysStatFiltered.items():
+            if statName in lastCommand:
+                if lastCommand[statName] != statVal and statName != "system_time": # DOSENT COMPARE "system_time" BECAUSE IT ALWAYS CHANGES, "system_time" IS UPDATED LATER
+                    print(statName, statVal)
+                    data.append((fortigateId, uniqueComId, statName, statVal))
+            else:
                 data.append((fortigateId, uniqueComId, statName, statVal))
+
+
+    # ----- UPDATES SYSTEM TIME
+        if len(data) == 0:
+            try:
+                cursor.execute('''UPDATE get_sys_stat SET stat_val = ? WHERE command_id = ? AND stat_name = ?''', (newTime, lastCommandId, "system_time"))
+                return
+            except sqlite3.OperationalError as error:
+                print(f"gather.py:   Ther ws an error updating time in get_sys_stat: {error}")
         else:
-            data.append((fortigateId, uniqueComId, statName, statVal))
+            data.append((fortigateId, uniqueComId, "system_time", newTime)) # INSERTS TIME BACK IN
 
 
-# ----- UPDATES SYSTEM TIME, IF THERE WASNT A DIFFRENCE, THEN STOPS
-    if len(data) == 0:
-        try:
-            cursor.execute('''UPDATE get_sys_stat SET stat_val = ? WHERE command_id = ? AND stat_name = ?''', (newTime, lastCommandId, "system_time"))
-            return
-        except sqlite3.OperationalError as error:
-            print(f"gather.py:   Ther ws an error updating time in get_sys_stat: {error}")
-    else:
-        data.append((fortigateId, uniqueComId, "system_time", newTime)) # INSERTS TIME BACK IN
 
-        
+        sql = '''
+        INSERT INTO get_sys_stat (fortigate_id, command_id, stat_name, stat_val)
+        VALUES (?, ?, ?, ?);
+        '''
+        cursor.executemany(sql, data)
 
-    sql = '''
-    INSERT INTO get_sys_stat (fortigate_id, command_id, stat_name, stat_val)
-    VALUES (?, ?, ?, ?);
-    '''
-    cursor.executemany(sql, data)
+    # ----- UPDATES HOSTNAME AND VDOM_ENABLED INSIDE "fortigate" TABLE
+        if "hostname" in sysStatFiltered and "virtual_domain_configuration" in sysStatFiltered:
+            vdomEnabled = sysStatFiltered["virtual_domain_configuration"]
 
-# ----- UPDATES HOSTNAME AND VDOM_ENABLED INSIDE "fortigate" TABLE
-    if "hostname" in sysStatFiltered and "virtual_domain_configuration" in sysStatFiltered:
-        vdomEnabled = sysStatFiltered["virtual_domain_configuration"]
+            if vdomEnabled == "multiple":
+                vdomEnabled = 1
+            elif vdomEnabled == "disable":
+                vdomEnabled = 0
+            else:
+                vdomEnabled = 0
+                print("gather.py:    There was an error figuring out vdomEnabled. Defaulting to disabled")
 
-        if vdomEnabled == "multiple":
-            vdomEnabled = 1
-        elif vdomEnabled == "disable":
-            vdomEnabled = 0
+            cursor.execute('''UPDATE fortigate SET hostname = ?, vdom_enabled = ? WHERE fortigate_id = ?''', (sysStatFiltered["hostname"], vdomEnabled, fortigateId))
         else:
-            vdomEnabled = 0
-            print("gather.py:    There was an error figuring out vdomEnabled. Defaulting to disabled")
+            print("gather.py:    There was a problem updating hostname and sysStatFiltered. Doesent exist!")
 
-        cursor.execute('''UPDATE fortigate SET hostname = ?, vdom_enabled = ? WHERE fortigate_id = ?''', (sysStatFiltered["hostname"], vdomEnabled, fortigateId))
-    else:
-        print("gather.py:    There was a problem updating hostname and sysStatFiltered. Doesent exist!")
 
+
+#_______________________________ Show _______________________________
 
 listdirStarts = lambda folderPath, startsWith: [f for f in os.listdir(folderPath) if f.startswith(startsWith)]
 def showFindDiffrence(oldFile, newFile, excludeLines):
@@ -177,7 +184,7 @@ def show(channel, fortigateId, fortigateIp, vdomId, confSaltLines, INSTANCE_FOLD
 
 # ----- CHECKS FOR DIFFRENCE BETWEEN NEW AND OLD CONF, if:True THEN IT SAVES THE NEW CONF & APPEND THE UPDATES TO THE LOG FILE.
 # NOTE: need to write this code cleaner/better
-    if lastMadeConfFile != None: 
+    if lastMadeConfFile != None and outputFiltered != None: 
         
         prevConfFile = modules.readTxt(folderPath + "/" + lastMadeConfFile) # READS THE PREVIUS MADE CONF FILE
         diffrenceBool, diffrenceSTR = showFindDiffrence(prevConfFile, outputFiltered, confSaltLines) # CHECKS THE DIFFRNECE
@@ -188,27 +195,77 @@ def show(channel, fortigateId, fortigateIp, vdomId, confSaltLines, INSTANCE_FOLD
             diffrenceSTR = f"\n \n{'_'*80} \n" + str(datetime.datetime.now()) + diffrenceSTR
             modules.writeTXT(folderPath + "/" + confLogFileName, diffrenceSTR, method="a") # APPENDS CHANGES TO THE LOG FILE
     
-    else:
+    elif outputFiltered != None:
         with open(folderPath + "/" + fileName, 'w') as f: # THIS CODE IS RUN WHEN THERE IS NO FILE TO BEGIN WITH
             f.write(outputFiltered)
 
-            
 
 
-for fortigate in allFortigates:
+#_________________________ Get Sys Perf Stat ________________________
 
-    id, ip, username, passwordEncrypted = fortigate[0], fortigate[1], fortigate[2], fortigate[3]
-    con = modules.Connection(ip, username, cipher.decrypt(passwordEncrypted).decode())
-    channel = modules.Channel(con.openChannel())
-    channel.startup()
+def getSysPerfStat(channel, cursor, fortigateId):
+    perfStat = channel.execute("get sys perf stat")
+
+    if perfStat != None:
+        perfStatFiltered = filter.perfStatFilter(perfStat)
+
+        if len(perfStatFiltered) >= 3:
+            cpuData = perfStatFiltered[0].get('cpu', {})
+            memoryData = perfStatFiltered[1].get('memory', {})
+            uptime = perfStatFiltered[2].get('uptime', "")
+
+            dataToInsert = (
+                fortigateId,
+                cpuData.get('user', None),
+                cpuData.get('system', None),
+                cpuData.get('nice', None),
+                cpuData.get('idle', None),
+                cpuData.get('iowait', None),
+                cpuData.get('irq', None),
+                memoryData.get('total', None),
+                memoryData.get('used', None),
+                memoryData.get('free', None),
+                memoryData.get('freeable', None),
+                uptime
+            )
+
+            sql = '''
+                INSERT INTO pref_stat (
+                    fortigate_id, cpu_user, cpu_system, cpu_nice, cpu_idle, cpu_iowait, cpu_irq,
+                    memory_total, memory_used, memory_free, memory_freeable, uptime
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                '''    
+            cursor.execute(sql, dataToInsert)
+            cursor.execute('''UPDATE fortigate SET uptime = ? WHERE fortigate_id = ?''', (uptime, fortigateId))
 
 
-    getSysStat(channel, cursor, id)
-    show(channel, id, ip, 7, constants["confSaltLines"], INSTANCE_FOLDER_PATH)
+while True:
+    for fortigate in allFortigates:
+        startTime = time.time()
+
+        print("Connecting")
+        id, ip, username, passwordEncrypted = fortigate[0], fortigate[1], fortigate[2], fortigate[3]
+        con = modules.Connection(ip, username, cipher.decrypt(passwordEncrypted).decode())
+        channel = modules.Channel(con.openChannel())
+        channel.startup()
 
 
-    sqliteConn.commit()
-    channel.close() 
-    con.close()
+        print("Get Sys stat!")
+        getSysStat(channel, cursor, id)
+        print("Show!")
+        show(channel, id, ip, 7, constants["confSaltLines"], INSTANCE_FOLDER_PATH)
+        print("Get pref stat!")
+        getSysPerfStat(channel, cursor, id)
+
+
+        print("closing")
+        sqliteConn.commit()
+        channel.close() 
+        con.close()
+
+        print(f"\n \n Elapsed time: {time.time() - startTime}")
+
+        print("\n\n______________________________________________________________")
+
 
 sqliteConn.close()

@@ -5,56 +5,15 @@ import paramiko
 import socket
 import rich
 import time
-import re
+import os
 
-#------- Wait for data to be available on the channel within a specified timeout
-# Minimum func return time is: burstTimeout
-# Maximum func return time is: timeout
-#def terminalScreen(channel, stopString=None, timeout=10, burstTimeout=0.8):
-#    output = ""
-#    totalTimeoutTime = time.time() + timeout
-#
-#
-## ----- STOPS IF END STRING (most reliable, for big data. Cant be used for evrything)
-#    if stopString != None:
-#        while time.time() < totalTimeoutTime:
-#            if channel.recv_ready():
-#                output += channel.recv(9999).decode('utf-8')
-#                totalTimeoutTime = time.time() + timeout
-#
-#            if output.endswith(stopString) == True:
-#                #print("IT WORKED :) \n \n \n \n")
-#                break
-#
-#            time.sleep(0.1)
-#
-#
-#
-## ----- STOPS BASED ON TIME
-#    else:
-#        burstTimeoutTime = time.time() + burstTimeout
-#        while time.time() < totalTimeoutTime:
-#            if channel.recv_ready():
-#                output += channel.recv(9999).decode('utf-8')
-#                burstTimeoutTime = time.time() + burstTimeout # RESETS THE BURST TIMEOUT
-#
-#            elif time.time() > burstTimeoutTime:
-#                break
-#            
-#            time.sleep(0.2)  # Short sleep to prevent busy waiting
-#   
-#
-#
-#    if output != "":
-#        return output
-#    else:
-#        return None  
-#
 
 def readTxt(path):
-    with open (path, "r") as myfile:
-        data = myfile.read()
-    return data
+    if os.path.exists(path):
+        with open (path, "r") as myfile:
+            data = myfile.read()
+        return data
+    return None
 
 def writeTXT(path, text, method="w"):
     try:
@@ -62,6 +21,36 @@ def writeTXT(path, text, method="w"):
             f.write(text)
     except Exception as error:
         print("modules.py    There was an error writing to TXT: {error}")
+
+def findNum(text):
+    outputNum = []
+
+    numStr = ""
+    hasStartedNum = False
+    length = len(text)
+    for i, char in enumerate(text):
+        if char.isdigit():
+            numStr += char
+            hasStartedNum = True
+
+        elif char == '.' and i + 1 < length and text[i+1].isdigit() and hasStartedNum == True: # HANDLES FLOATS
+            numStr += char
+
+        elif numStr: 
+            if "." in numStr:
+                outputNum.append(float(numStr))
+            elif numStr.isdigit():
+                outputNum.append(int(numStr))
+
+            numStr = ""
+            hasStartedNum = False
+
+    if numStr:  # Check after the loop to catch any trailing numbers
+        outputNum.append(numStr)
+
+    return outputNum
+
+
 
 def getTableColumns(cursor, tableName, onlyNames=True):
     cursor.execute(f"PRAGMA table_info({tableName});")
@@ -130,8 +119,9 @@ class Channel:
 
     def startup(self):
         initalPromt = self.terminal()
-        if "Press 'a' to accept" in initalPromt:
-            self.execute("a")
+        if initalPromt != None:
+            if "Press 'a' to accept" in initalPromt:
+                self.execute("a")
          
 
     def close(self):
@@ -141,19 +131,26 @@ class Connection:
         
     def __init__(self, ipAddr, username, password):
 
-        try:
-            self.client = paramiko.SSHClient()
-            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            self.client.connect(ipAddr, username=username, password=password)
 
-        except paramiko.ssh_exception.AuthenticationException as error:
-            raise Exception(f"modules.py:   Authentication error: {error}")
+        while True:
+            try:
+                self.client = paramiko.SSHClient()
+                self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                self.client.connect(ipAddr, username=username, password=password)
+                break
 
-        except socket.gaierror as error:
-            raise Exception(f"modules.py:   There was an error connecting to fortigate (Wrong ip): {error}")
+            except paramiko.ssh_exception.AuthenticationException as error:
+                raise Exception(f"modules.py:   Authentication error: {error}")
+
+            except socket.gaierror as error:
+                print(f"modules.py:   There was an error connecting to fortigate (Wrong ip, internett?): {error}")
+
+            except TimeoutError as error:
+                print("modules.py:   Got timed out while trying to connect to fortigate! Retrying in 10 sec")
+                
+            time.sleep(10)
     
 
-    #gaierror
 
     def openChannel(self):
         channel = self.client.get_transport().open_session()
@@ -192,28 +189,75 @@ class Filter:
         for aspect in aspects:
             aspect = aspect.replace("\r", "")
             if len(aspect) >= 3:
-
                 splittedAspect = aspect.split(":")
-                value = ":".join(splittedAspect[1:]).lower() # JOINS THE REST OF THE ASPECT
-                
-                key = splittedAspect[0] # FIRST WILL ALWAYS BE KEY
-                key = self.replaceChar(key, "_", ["-", " ", "/"]) # REPLACES THE LIST WITH THE SECOND STRING (_)
+                if len(aspect) == 2: 
+                    value = ":".join(splittedAspect[1:]).lower() # JOINS THE REST OF THE ASPECT
 
-                if " " == key[0]:
-                    key = key[1:]
+                    key = splittedAspect[0] # FIRST WILL ALWAYS BE KEY
+                    key = self.replaceChar(key, "_", ["-", " ", "/"]) # REPLACES THE LIST WITH THE SECOND STRING (_)
 
-                if " " == value[0]:
-                    value = value[1:]
-            
-                output[key.lower()] = value
+                    key.strip()
+                    value.strip()
+
+                    output[key.lower()] = value
 
         return output
     
     def showFilter(self, text): # REMOVES \n
-        cleaned_lines = []
-        for line in text.strip().splitlines():
-            cleaned_line = line.strip()
-            cleaned_lines.append(cleaned_line)
+        
+        if text != None:
+            cleanedLines = []
+            for line in text.strip().splitlines():
+                cleaned_line = line.strip()
+                cleanedLines.append(cleaned_line)
 
-        result = '\n'.join(cleaned_lines)
-        return result
+            result = '\n'.join(cleanedLines)
+            return result
+        
+        return None
+    
+    
+    def perfStatFilter(self, text):
+        cleanedLines = []
+
+        if text != None:
+            for line in text.strip().splitlines():
+
+                if line.startswith("Memory: "):
+                    memStats = line.lower().split(",")
+                    if len(memStats) >= 4:
+                        total = findNum(memStats[0])[0]
+                        used = findNum(memStats[1])[1]
+                        free = findNum(memStats[2])[1]
+                        freeable = findNum(memStats[3])[1]
+
+                        cleanedLines.append({"memory": {"total": total, "used": used, "free": free, "freeable": freeable}})
+
+                elif line.startswith("CPU states:"):
+                    cpuStats = line.replace("CPU states:", "").strip()
+                    cpuStats = cpuStats.lower().split(" ") # MAKES ['0%', 'user', '0%', 'system', '0%' OSV. FIRST VAL IS THE STRINGS VAL FOR SOME REASON
+
+                    if len(cpuStats) >= 14:
+                        cpuDict = {}
+                        for i in range(1, len(cpuStats)-1, 2): # COUNTS: 1, 3, 5, 7 OSV   
+                            label = cpuStats[i]
+                            cpuStat = findNum(cpuStats[i-1])[0] # -1 BECAUSE THE FIRST % IS TIED TO THE SECOND LABEL
+                            cpuDict[label] = cpuStat
+
+
+                        cleanedLines.append({"cpu": cpuDict})
+
+                elif line.startswith("Uptime:"):
+
+                    uptime = line.replace("Uptime:", "")
+                    uptime = [text for text in uptime.split(" ") if text != ""] # REMOVES UNECCECARY SPACES 
+                    uptime = " ".join(uptime)
+
+                    cleanedLines.append({"uptime": uptime.lower()})
+
+            return cleanedLines 
+
+        else:
+            return text   
+
+
