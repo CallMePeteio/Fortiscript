@@ -46,7 +46,8 @@ def getLastCommandFortigate(fortigateId, cursor):
 
     return command, commandId
 
-def getSysStat(channel, cursor, fortigateId):
+def getSysStat(channel, cursor, fortigateId, logger):
+    logger.info("   Running: get sys stat")
     sysStat = channel.execute("get sys stat") 
     if sysStat != None:
         sysStatFiltered = filter.getSysStatFilter(sysStat) # GETS THE FILTERED KEYPOINTS (DICT)
@@ -79,7 +80,7 @@ def getSysStat(channel, cursor, fortigateId):
                 cursor.execute('''UPDATE get_sys_stat SET stat_val = ? WHERE command_id = ? AND stat_name = ?''', (newTime, lastCommandId, "system_time"))
                 return
             except sqlite3.OperationalError as error:
-                print(f"gather.py:   Ther ws an error updating time in get_sys_stat: {error}")
+                logger.error(f"    Get sys stat:   Ther ws an error updating time in get_sys_stat: {error}")
         else:
             data.append((fortigateId, biggestCommandId, "system_time", newTime)) # INSERTS TIME BACK IN
 
@@ -101,12 +102,13 @@ def getSysStat(channel, cursor, fortigateId):
                 vdomEnabled = 0
             else:
                 vdomEnabled = 0
-                print("gather.py:    There was an error figuring out vdomEnabled. Defaulting to disabled")
+                logger.error("    Get sys stat:    There was an error figuring out vdomEnabled. Defaulting to disabled")
 
             cursor.execute('''UPDATE fortigate SET hostname = ?, vdom_enabled = ? WHERE fortigate_id = ?''', (sysStatFiltered["hostname"], vdomEnabled, fortigateId))
         else:
-            print("gather.py:    There was a problem updating hostname and sysStatFiltered. Doesent exist!")
-
+            logger.error("    Get sys stat:    There was a problem updating hostname and sysStatFiltered. Doesent exist!")
+    else:
+        logger.error("    Get sys stat:     Command returned None, skipping!")
 
 
 #_______________________________ Show _______________________________
@@ -118,16 +120,19 @@ def showFindDiffrence(oldFile, newFile, excludeLines):
         prevLines = oldFile.splitlines()
         outputLine = newFile.splitlines()
 
+        diffrencesFound = 0
         for i, (prevLine, outputLine) in enumerate(zip(prevLines, outputLine)):
             if prevLine != outputLine and i+1 not in excludeLines:
+                diffrencesFound +=1
                 outputStr += f"\nLine {i + 1} changed:\nFrom:   {prevLine}\nTo:   {outputLine} \n"
  
     if outputStr == "":
-        return False, outputStr
+        return False, outputStr, diffrencesFound
     else: 
-        return True, outputStr 
+        return True, outputStr, diffrencesFound
 
-def show(channel, fortigateId, fortigateIp, vdomId, confSaltLines, INSTANCE_FOLDER_PATH):
+def show(channel, fortigateId, fortigateIp, vdomId, confSaltLines, INSTANCE_FOLDER_PATH, logger):
+    logger.info("   Running: Show")
     confLogFileName = str(vdomId) + "_" + "log"
     
     fileStart = str(vdomId) + "_"
@@ -160,9 +165,7 @@ def show(channel, fortigateId, fortigateIp, vdomId, confSaltLines, INSTANCE_FOLD
 
 
             lastMadeConfFile = str(vdomId) + "_" + str(lastMadeConfTime)
-
-
-
+        
 # ----- RUNS THE SHOW COMMAND & FILTERS IT
     output = channel.execute("show")
     outputFiltered = filter.showFilter(output)
@@ -173,23 +176,30 @@ def show(channel, fortigateId, fortigateIp, vdomId, confSaltLines, INSTANCE_FOLD
     if lastMadeConfFile != None and outputFiltered != None: 
         
         prevConfFile = modules.readTxt(folderPath + "/" + lastMadeConfFile) # READS THE PREVIUS MADE CONF FILE
-        diffrenceBool, diffrenceSTR = showFindDiffrence(prevConfFile, outputFiltered, confSaltLines) # CHECKS THE DIFFRNECE
+        diffrenceBool, diffrenceSTR, diffrenceAmount = showFindDiffrence(prevConfFile, outputFiltered, confSaltLines) # CHECKS THE DIFFRNECE
 
         if diffrenceBool == True:
             modules.writeTXT(folderPath + "/" + fileName, outputFiltered) # SAVES THE NEWEST CONF
 
             diffrenceSTR = f"\n \n{'_'*80} \n" + str(datetime.datetime.now()) + diffrenceSTR
             modules.writeTXT(folderPath + "/" + confLogFileName, diffrenceSTR, method="a") # APPENDS CHANGES TO THE LOG FILE
+
+            logger.debug(f"  Detected {diffrenceAmount} diffrences in config file")
+
     
     elif outputFiltered != None:
         with open(folderPath + "/" + fileName, 'w') as f: # THIS CODE IS RUN WHEN THERE IS NO FILE TO BEGIN WITH
             f.write(outputFiltered)
+        logger.debug(f"  Making first Config File, fortigate_id: {fortigateId}")
+    else:
+        logger.error("    Outputfiltered returned None!")
 
 
 
 #_________________________ Get Sys Perf Stat ________________________
 
-def getSysPerfStat(channel, cursor, fortigateId):
+def getSysPerfStat(channel, cursor, fortigateId, logger):
+    logger.info("   Running: get sys perf stat")
     perfStat = channel.execute("get sys perf stat")
 
     if perfStat != None:
@@ -223,32 +233,40 @@ def getSysPerfStat(channel, cursor, fortigateId):
                 '''    
             cursor.execute(sql, dataToInsert)
             cursor.execute('''UPDATE fortigate SET uptime = ? WHERE fortigate_id = ?''', (uptime, fortigateId))
-
+        else:
+            logger.debug(f"    Filter returned length less than 3: {perfStat}")
+    else:
+        logger.debug(f"    Command outputed: {perfStat}!")
 
 
 #________________________ Diagnose Sys Top-Mem _______________________
 
-def diagSysTopMem(channel, cursor, fortiageId):
+def diagSysTopMem(channel, cursor, fortiageId, logger):
+    logger.info("   Running: diagnose sys top")
     topMem = channel.execute("diagnose sys top-mem")
     topMemFiltered = filter.topMemFilter(topMem)
 
 
-    # ----- FINDS THE BIGGEST "command_id" IN THE TABLE
-    biggestCommandId = getLastCommandId("top_mem", cursor)
+    if topMemFiltered != None:
+        # ----- FINDS THE BIGGEST "command_id" IN THE TABLE
+        biggestCommandId = getLastCommandId("top_mem", cursor)
 
-    data = []
-    for process, value in topMemFiltered.items():
-        if len(value) >= 2 and "processId" in value and "memUsage" in value:
-          processId = value["processId"]
-          memUsage = value["memUsage"]
-          
-          data.append((fortiageId, biggestCommandId, process, processId, memUsage))
-    
-    sql = '''
-    INSERT INTO top_mem (fortigate_id, command_id, process_name, process_id, memory_usage)
-    VALUES (?, ?, ?, ?, ?);
-    '''
-    cursor.executemany(sql, data)
+        data = []
+        for process, value in topMemFiltered.items():
+            if len(value) >= 2 and "processId" in value and "memUsage" in value:
+              processId = value["processId"]
+              memUsage = value["memUsage"]
 
+              data.append((fortiageId, biggestCommandId, process, processId, memUsage))
+
+        sql = '''
+        INSERT INTO top_mem (fortigate_id, command_id, process_name, process_id, memory_usage)
+        VALUES (?, ?, ?, ?, ?);
+        '''
+        cursor.executemany(sql, data)
+    elif topMem == None:
+        logger.error(f"    Top-mem Command retuned: {topMem}!")
+    else:
+        logger.error(f"    Top-mem Filter returned: {topMem}!")
 
 
