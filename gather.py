@@ -8,32 +8,25 @@ import json
 import time
 import os
 
-INSTANCE_FOLDER_PATH = "./instance"
-sqliteConn = sqlite3.connect(INSTANCE_FOLDER_PATH + '/db.db')
-cursor = sqliteConn.cursor()
-cursor.execute("PRAGMA foreign_keys = ON;")
-
-def start(folderPath="./instance"):
-    with open(folderPath + "/config.json") as f:
-        constants = json.load(f)
-    cipherSuite = Fernet(bytes(constants["encryptionKey"], encoding="utf-8"))
-
-
-    cursor.execute("SELECT * from fortigate")
-    fortigates = cursor.fetchall()
-
-    return fortigates, cipherSuite, constants
-
 
 
 filter = modules.Filter()
-allFortigates, cipher, constants = start(INSTANCE_FOLDER_PATH)
 
+def getLastCommandId(table, cursor): 
+    cursor.execute(f"SELECT MAX(command_id) FROM {table}")
+    biggestCommandId = cursor.fetchone()[0]
+
+    if biggestCommandId != None:
+            uniqueComId = biggestCommandId +1
+    else:
+        uniqueComId = 1
+   
+    return uniqueComId
 
 #___________________________ Get Sys Stat ___________________________
 
-def getLastCommand(fortigateId):
-    sql = """
+def getLastCommandFortigate(fortigateId, cursor):
+    sql = f"""
         SELECT * FROM get_sys_stat
         WHERE command_id = (
             SELECT MAX(command_id)
@@ -57,7 +50,7 @@ def getSysStat(channel, cursor, fortigateId):
     sysStat = channel.execute("get sys stat") 
     if sysStat != None:
         sysStatFiltered = filter.getSysStatFilter(sysStat) # GETS THE FILTERED KEYPOINTS (DICT)
-        lastCommand, lastCommandId = getLastCommand(fortigateId) # GETS THE LAST COMMAND MADE FOR THAT FORTIGATE
+        lastCommand, lastCommandId = getLastCommandFortigate(fortigateId, cursor) # GETS THE LAST COMMAND MADE FOR THAT FORTIGATE
 
 
         newTime = 0
@@ -66,15 +59,8 @@ def getSysStat(channel, cursor, fortigateId):
 
 
 
-    # ----- FINDS THE BIGGEST "command_id" THEN ADDS +1 TO GET A UNIQUE: "command_id"
-        cursor.execute("SELECT MAX(command_id) FROM get_sys_stat")
-        biggestCommandId = cursor.fetchone()[0] 
-
-        if biggestCommandId != None:
-            uniqueComId = biggestCommandId +1
-        else:
-            uniqueComId = 1
-
+    # ----- FINDS THE BIGGEST "command_id" IN THE TABLE
+        biggestCommandId = getLastCommandId("get_sys_stat", cursor)
 
     # ----- STORES EATCH DATAPOINT INSIDE A LSIT, REDUCE UNNECCECARY WRITES TO DB
         data = []
@@ -82,9 +68,9 @@ def getSysStat(channel, cursor, fortigateId):
             if statName in lastCommand:
                 if lastCommand[statName] != statVal and statName != "system_time": # DOSENT COMPARE "system_time" BECAUSE IT ALWAYS CHANGES, "system_time" IS UPDATED LATER
                     print(statName, statVal)
-                    data.append((fortigateId, uniqueComId, statName, statVal))
+                    data.append((fortigateId, biggestCommandId, statName, statVal))
             else:
-                data.append((fortigateId, uniqueComId, statName, statVal))
+                data.append((fortigateId, biggestCommandId, statName, statVal))
 
 
     # ----- UPDATES SYSTEM TIME
@@ -95,7 +81,7 @@ def getSysStat(channel, cursor, fortigateId):
             except sqlite3.OperationalError as error:
                 print(f"gather.py:   Ther ws an error updating time in get_sys_stat: {error}")
         else:
-            data.append((fortigateId, uniqueComId, "system_time", newTime)) # INSERTS TIME BACK IN
+            data.append((fortigateId, biggestCommandId, "system_time", newTime)) # INSERTS TIME BACK IN
 
 
 
@@ -240,18 +226,29 @@ def getSysPerfStat(channel, cursor, fortigateId):
 
 
 
-for fortigate in allFortigates:
+#________________________ Diagnose Sys Top-Mem _______________________
 
-    id, ip, username, passwordEncrypted = fortigate[0], fortigate[1], fortigate[2], fortigate[3]
-    con = modules.Connection(ip, username, cipher.decrypt(passwordEncrypted).decode())
-    channel = modules.Channel(con.openChannel())
-    channel.startup()
+def diagSysTopMem(channel, cursor, fortiageId):
+    topMem = channel.execute("diagnose sys top-mem")
+    topMemFiltered = filter.topMemFilter(topMem)
 
-    getSysStat(channel, cursor, id)
-    show(channel, id, ip, 7, constants["confSaltLines"], INSTANCE_FOLDER_PATH)
-    getSysPerfStat(channel, cursor, id)
 
-    sqliteConn.commit()
-    channel.close() 
-    con.close()
-sqliteConn.close()
+    # ----- FINDS THE BIGGEST "command_id" IN THE TABLE
+    biggestCommandId = getLastCommandId("top_mem", cursor)
+
+    data = []
+    for process, value in topMemFiltered.items():
+        if len(value) >= 2 and "processId" in value and "memUsage" in value:
+          processId = value["processId"]
+          memUsage = value["memUsage"]
+          
+          data.append((fortiageId, biggestCommandId, process, processId, memUsage))
+    
+    sql = '''
+    INSERT INTO top_mem (fortigate_id, command_id, process_name, process_id, memory_usage)
+    VALUES (?, ?, ?, ?, ?);
+    '''
+    cursor.executemany(sql, data)
+
+
+
