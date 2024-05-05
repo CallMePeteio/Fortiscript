@@ -239,33 +239,19 @@ def getSysPerfStat(channel, cursor, fortigateId):
             cursor.execute('''UPDATE fortigate SET uptime = ? WHERE fortigate_id = ?''', (uptime, fortigateId))
 
 
-while True:
-    for fortigate in allFortigates:
-        startTime = time.time()
 
-        print("Connecting")
-        id, ip, username, passwordEncrypted = fortigate[0], fortigate[1], fortigate[2], fortigate[3]
-        con = modules.Connection(ip, username, cipher.decrypt(passwordEncrypted).decode())
-        channel = modules.Channel(con.openChannel())
-        channel.startup()
+for fortigate in allFortigates:
 
+    id, ip, username, passwordEncrypted = fortigate[0], fortigate[1], fortigate[2], fortigate[3]
+    con = modules.Connection(ip, username, cipher.decrypt(passwordEncrypted).decode())
+    channel = modules.Channel(con.openChannel())
+    channel.startup()
 
-        print("Get Sys stat!")
-        getSysStat(channel, cursor, id)
-        print("Show!")
-        show(channel, id, ip, 7, constants["confSaltLines"], INSTANCE_FOLDER_PATH)
-        print("Get pref stat!")
-        getSysPerfStat(channel, cursor, id)
+    getSysStat(channel, cursor, id)
+    show(channel, id, ip, 7, constants["confSaltLines"], INSTANCE_FOLDER_PATH)
+    getSysPerfStat(channel, cursor, id)
 
-
-        print("closing")
-        sqliteConn.commit()
-        channel.close() 
-        con.close()
-
-        print(f"\n \n Elapsed time: {time.time() - startTime}")
-
-        print("\n\n______________________________________________________________")
-
-
+    sqliteConn.commit()
+    channel.close() 
+    con.close()
 sqliteConn.close()
