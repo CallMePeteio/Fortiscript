@@ -48,7 +48,7 @@ def findNum(text):
         outputNum.append(numStr)
 
     if len(outputNum) == 0:
-        return None
+        return [None]
     return outputNum
 
 
@@ -86,7 +86,7 @@ def terminalScreen(channel, timeout=10, burstTimeout=0.9):
     if output != "":
         return output
     else:
-        return [None]   
+        return None
 
 
 class Channel:
@@ -274,11 +274,12 @@ class Filter:
                 if len(processMemUsage) >= 2:
                     processName = processMemUsage[0].strip().split(" ")[0] # FINDS THE PROCESS NAME BY SPLITTING THE STRING BY " " AND TAKING THE FIRST INDEX
                     processName = self.replaceChar(processName, "_", ["-", " ", "/"]) # REPLACES THE LIST WITH THE SECOND STRING (_)
-                                        
+                    
                     processId = findNum(processMemUsage[0]) # THE ONLY NUMBER IN THE FIRST STRING == PROCESSID
                     memUsage = findNum(processMemUsage[1]) # THE ONLY NUMBER IN THE SECOND STRING == MEMUSAGE
 
-                    outputDict[processName.lower()] = {"processId": processId[0], "memUsage": memUsage[0]}
+                    if processName != "Top_5":
+                        outputDict[processName.lower()] = {"processId": processId[0], "memUsage": memUsage[0]}
             
             if len(outputDict) != 0: # IF WE GATHERED SOM DATA
                 return outputDict

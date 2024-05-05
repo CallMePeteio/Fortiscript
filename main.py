@@ -41,15 +41,15 @@ def start(folderPath="./instance"):
 
 
 INSTANCE_FOLDER_PATH = "./instance"
-sqliteConn = sqlite3.connect(INSTANCE_FOLDER_PATH + '/db.db')
+sqliteConn = sqlite3.connect(INSTANCE_FOLDER_PATH + '/db.db', check_same_thread=False)
 cursor = sqliteConn.cursor()
 cursor.execute("PRAGMA foreign_keys = ON;")
 cipher, constants, logger = start(INSTANCE_FOLDER_PATH)
 
 
 
-#thread = threading.Thread(target=maintain.main, args=(logger,))
-#thread.start()
+thread = threading.Thread(target=maintain.main, args=(sqliteConn, logger))
+thread.start()
 
 
 cursor.execute("SELECT * from fortigate")
@@ -68,9 +68,9 @@ while True:
         channel = modules.Channel(con.openChannel())
         channel.startup()
 
-        gather.getSysStat(channel, cursor, id, logger)
-        gather.show(channel, id, ip, 7, constants["confSaltLines"], INSTANCE_FOLDER_PATH, logger)
-        gather.getSysPerfStat(channel, cursor, id, logger)
+        #gather.getSysStat(channel, cursor, id, logger)
+        #gather.show(channel, id, ip, 7, constants["confSaltLines"], INSTANCE_FOLDER_PATH, logger)
+        #gather.getSysPerfStat(channel, cursor, id, logger)
         gather.diagSysTopMem(channel, cursor, id, logger)
 
 
