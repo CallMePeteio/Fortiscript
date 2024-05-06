@@ -32,10 +32,11 @@ def findNum(text):
             numStr += char
             hasStartedNum = True
 
-        elif char == '.' and i + 1 < length and text[i+1].isdigit() and hasStartedNum == True: # HANDLES FLOATS
+        elif char == '.' and i + 1 < length and text[i+1].isdigit() and hasStartedNum == True and "." not in numStr: # HANDLES FLOATS
             numStr += char
 
-        elif numStr: 
+        elif numStr:                 
+
             if "." in numStr:
                 outputNum.append(float(numStr))
             elif numStr.isdigit():
@@ -45,7 +46,11 @@ def findNum(text):
             hasStartedNum = False
 
     if numStr:  # Check after the loop to catch any trailing numbers
-        outputNum.append(numStr)
+        if "." in numStr:
+            outputNum.append(float(numStr))
+        else:
+            outputNum.append(int(numStr))
+
 
     if len(outputNum) == 0:
         return [None]
@@ -91,18 +96,22 @@ def terminalScreen(channel, timeout=10, burstTimeout=0.9):
 
 class Channel:
 
-    def __init__(self, channel):
+    def __init__(self, channel, logger):
         self.channel = channel
+        self.logger = logger
 
         
     def execute(self, command, enter=True, filter=True):
-        if enter == True:
-            self.channel.send(command + "\n")
-        else: 
-            self.channel.send(command)
+        try:
+            if enter == True:
+                self.channel.send(command + "\n")
+            else: 
+                self.channel.send(command)
+        except OSError as error:
+            self.logger.critical(f"Could not execute, ran into an error: {error}")
+            return None
 
         output = terminalScreen(self.channel)
-
         if filter == True and output != None:
             if output.endswith("# ") : # SMALL FILTER, REMOVES: VDOMS NAME # FROM THE END
                 lastNewline = output.rfind("\n")
@@ -278,7 +287,7 @@ class Filter:
                     processId = findNum(processMemUsage[0]) # THE ONLY NUMBER IN THE FIRST STRING == PROCESSID
                     memUsage = findNum(processMemUsage[1]) # THE ONLY NUMBER IN THE SECOND STRING == MEMUSAGE
 
-                    if processName != "Top_5":
+                    if processName != "Top_5": # DONT SAVE TOTAL TOP5 MEM USAGE
                         outputDict[processName.lower()] = {"processId": processId[0], "memUsage": memUsage[0]}
             
             if len(outputDict) != 0: # IF WE GATHERED SOM DATA

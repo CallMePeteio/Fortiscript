@@ -9,6 +9,7 @@ import sqlite3
 import gather
 import json
 import time
+import os
 
 def start(folderPath="./instance"):
     with open(folderPath + "/config.json") as f:
@@ -41,7 +42,8 @@ def start(folderPath="./instance"):
 
 
 INSTANCE_FOLDER_PATH = "./instance"
-sqliteConn = sqlite3.connect(INSTANCE_FOLDER_PATH + '/db.db', check_same_thread=False)
+
+sqliteConn = sqlite3.connect(INSTANCE_FOLDER_PATH + "/db.db", check_same_thread=False)
 cursor = sqliteConn.cursor()
 cursor.execute("PRAGMA foreign_keys = ON;")
 cipher, constants, logger = start(INSTANCE_FOLDER_PATH)
@@ -52,9 +54,10 @@ thread = threading.Thread(target=maintain.main, args=(sqliteConn, logger))
 thread.start()
 
 
-cursor.execute("SELECT * from fortigate")
-allFortigates = cursor.fetchall()
 while True:
+    cursor.execute("SELECT * from fortigate")
+    allFortigates = cursor.fetchall()
+    
     for fortigate in allFortigates:
         logger.info(f"   Connecting to {fortigate[1]}")
         startTime = time.time()
@@ -62,15 +65,14 @@ while True:
 
 
 
-
         id, ip, username, passwordEncrypted = fortigate[0], fortigate[1], fortigate[2], fortigate[3]
         con = modules.Connection(ip, username, cipher.decrypt(passwordEncrypted).decode())
-        channel = modules.Channel(con.openChannel())
+        channel = modules.Channel(con.openChannel(), logger)
         channel.startup()
 
-        #gather.getSysStat(channel, cursor, id, logger)
-        #gather.show(channel, id, ip, 7, constants["confSaltLines"], INSTANCE_FOLDER_PATH, logger)
-        #gather.getSysPerfStat(channel, cursor, id, logger)
+        gather.getSysStat(channel, cursor, id, logger)
+        gather.show(channel, id, ip, 7, constants["confSaltLines"], INSTANCE_FOLDER_PATH, logger)
+        gather.getSysPerfStat(channel, cursor, id, logger)
         gather.diagSysTopMem(channel, cursor, id, logger)
 
 

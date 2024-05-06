@@ -1,7 +1,7 @@
 
 {
-    "encryptionKey": "M7cc_BWyHwQdL2B40YFMBORLaZ_CZ-v2l4yDjDs-YwA=",
-
+    "encryptionKey": "a5gs0dIZL2_gHqJgmT3Jz6FUckrOJejV6irVWsWXVOw=",
+    "logToFile": false, 
     "confSaltLines": [2, 6528, 6528, 6534, 6540, 6546, 6552, 6558, 6564, 6570, 6576, 6582, 6588, 6594, 6600, 6606, 6612, 6616]
 }
 

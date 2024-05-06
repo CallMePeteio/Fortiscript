@@ -236,13 +236,13 @@ def getSysPerfStat(channel, cursor, fortigateId, logger):
         else:
             logger.debug(f"    Filter returned length less than 3: {perfStat}")
     else:
-        logger.debug(f"    Command outputed: {perfStat}!")
+        logger.error(f"    Command outputed: {perfStat}! (get sys pref stat)")
 
 
 #________________________ Diagnose Sys Top-Mem _______________________
 
 def diagSysTopMem(channel, cursor, fortiageId, logger):
-    logger.info("   Running: diagnose sys top")
+    logger.info("   Running: diagnose sys top-mem")
     topMem = channel.execute("diagnose sys top-mem")
     topMemFiltered = filter.topMemFilter(topMem)
 
