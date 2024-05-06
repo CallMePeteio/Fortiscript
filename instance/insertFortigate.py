@@ -95,7 +95,7 @@ def insertFortigate(ipAddr, username, password):
     cursor.execute('''INSERT INTO fortigate(ip_addr, username, password) VALUES(?,?,?)''', (ipAddr, username, sqlite3.Binary(encryptedPassword)))
     conn.commit()
 
-insertFortigate("Fortigate_ip_address" "fortigate_user", "fortigate_password_plaintext")
+insertFortigate("Fortigate_ip_address", "fortigate_user", "fortigate_password_plaintext")
 
 def deleteFortigate(id):
     cursor.execute('DELETE FROM fortigate WHERE fortigate_id = ?', (id,))
